@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoring Real-time MQTT</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --primary: #3498db;
+            --secondary: #2c3e50;
+            --danger: #e74c3c;
+            --warning: #f39c12;
+            --success: #2ecc71;
+            --info: #1abc9c;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: #333;
+        }
+        
+        .glass-card {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            margin-bottom: 2rem;
+        }
+        
+        .glass-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.15);
+        }
+        
+        .card-header {
+            background: rgba(255, 255, 255, 0.2);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.3);
+            border-radius: 20px 20px 0 0 !important;
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+        
+        .value-display {
+            font-size: 2.8rem;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
+            margin: 10px 0;
+        }
+        
+        .temperature-value {
+            color: var(--danger);
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .gas-value {
+            color: var(--warning);
+            background: linear-gradient(45deg, #feca57, #ff9f43);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .led-indicator {
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 10px;
+            box-shadow: 0 0 10px currentColor;
+            transition: all 0.3s ease;
+        }
+        
+        .led-on {
+            background-color: var(--success);
+            color: var(--success);
+            animation: pulse 2s infinite;
+        }
+        
+        .led-off {
+            background-color: #95a5a6;
+            color: #95a5a6;
+        }
+        
+        @keyframes pulse {
+            0% { box-shadow: 0 0 5px var(--success); }
+            50% { box-shadow: 0 0 20px var(--success); }
+            100% { box-shadow: 0 0 5px var(--success); }
+        }
+        
+        .connection-status {
+            padding: 8px 15px;
+            border-radius: 25px;
+            font-weight: 500;
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 8px;
+        }
+        
+        .connected { background-color: var(--success); animation: pulse 1.5s infinite; }
+        .disconnected { background-color: var(--danger); }
+        
+        .message-count {
+            background: var(--primary);
+            color: white;
+            padding: 3px 10px;
+            border-radius: 15px;
+            font-size: 0.9rem;
+        }
+
+        .publisher-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--secondary);
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid rgba(0,0,0,0.1);
+        }
+
+        .table-container {
+            max-height: 450px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-4">
+        <div class="text-center text-white mb-5">
+            <h1 class="display-4 fw-bold mb-3">
+                <i class="fas fa-satellite me-3"></i>REAL-TIME MQTT MONITOR
+            </h1>
+            <div class="d-flex justify-content-center gap-3 mb-4">
+                <div class="connection-status bg-dark bg-opacity-50">
+                    <span class="status-dot" id="statusDot"></span>
+                    <span id="connectionText">Menghubungkan...</span>
+                </div>
+                <div class="message-count">
+                    <i class="fas fa-envelope me-2"></i>
+                    <span id="messageCount">0</span> pesan
+                </div>
+                <div class="connection-status bg-dark bg-opacity-50">
+                    <i class="fas fa-clock me-2"></i>
+                    <span id="lastUpdateTime">-</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4 mb-5">
+            <div class="col-md-4">
+                <div class="glass-card h-100">
+                    <div class="card-header bg-primary bg-opacity-25 text-primary text-center">RT 1</div>
+                    <div class="card-body text-center">
+                        <div class="publisher-title">Suhu</div>
+                        <div class="value-display temperature-value" id="temp1">--.--°C</div>
+                        <div class="publisher-title mt-4">Gas</div>
+                        <div class="value-display gas-value" id="gas1">---</div>
+                        <div class="publisher-title mt-4">Electricity</div>
+                        <div class="d-flex align-items-center justify-content-center">
+                            <span class="led-indicator led-off" id="ledIndicator1"></span>
+                            <span class="h4 fw-bold" id="ledStatus1">OFF</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="glass-card h-100">
+                    <div class="card-header bg-success bg-opacity-25 text-success text-center">RT 2</div>
+                    <div class="card-body text-center">
+                        <div class="publisher-title">Suhu</div>
+                        <div class="value-display temperature-value" id="temp2">--.--°C</div>
+                        <div class="publisher-title mt-4">Gas</div>
+                        <div class="value-display gas-value" id="gas2">---</div>
+                        <div class="publisher-title mt-4">Electricity</div>
+                        <div class="d-flex align-items-center justify-content-center">
+                            <span class="led-indicator led-off" id="ledIndicator2"></span>
+                            <span class="h4 fw-bold" id="ledStatus2">OFF</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-4">
+                <div class="glass-card h-100">
+                    <div class="card-header bg-warning bg-opacity-25 text-warning text-center">RT 3</div>
+                    <div class="card-body text-center">
+                        <div class="publisher-title">Suhu</div>
+                        <div class="value-display temperature-value" id="temp3">--.--°C</div>
+                        <div class="publisher-title mt-4">Gas</div>
+                        <div class="value-display gas-value" id="gas3">---</div>
+                        <div class="publisher-title mt-4">Electricity</div>
+                        <div class="d-flex align-items-center justify-content-center">
+                            <span class="led-indicator led-off" id="ledIndicator3"></span>
+                            <span class="h4 fw-bold" id="ledStatus3">OFF</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mb-5">
+            <div class="col-12">
+                <div class="glass-card p-4">
+                    <h5 class="mb-4 fw-bold text-center"><i class="fas fa-chart-line me-2"></i>ANALISA GRAFIK REAL-TIME</h5>
+                    <div class="row">
+                        <div class="col-md-6"><canvas id="tempChart"></canvas></div>
+                        <div class="col-md-6"><canvas id="gasChart"></canvas></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row">
+            <div class="col-12">
+                <div class="glass-card">
+                    <div class="card-header bg-white text-dark d-flex justify-content-between align-items-center">
+                        <span class="fw-bold"><i class="fas fa-history me-2"></i>RIWAYAT LOG SENSOR</span>
+                        <button class="btn btn-success btn-sm" onclick="downloadCSV()">
+                            <i class="fas fa-file-download me-2"></i>Ekspor ke CSV (.csv)
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="table-responsive table-container">
+                            <table class="table table-hover mb-0 text-center">
+                                <thead class="table-light sticky-top">
+                                    <tr>
+                                        <th>Waktu</th>
+                                        <th>Sumber</th>
+                                        <th>Tipe Sensor</th>
+                                        <th>Nilai Terukur</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="historyBody">
+                                    </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const mqttConfig = {
+            broker: 'wss://broker.emqx.io:8084/mqtt',
+            topics: ['adcd', 'efgh', 'ijkl', 'panasdek', 'meledakdek', 'menyaladek', 'panasmasputra', 'meledakduar', 'menyalaabangku']
+        };
+
+        let historyData = [];
+        let messageCount = 0;
+        let tempChart, gasChart;
+        let timeLabels = [];
+        let tempData = { rt1: [], rt2: [], rt3: [] };
+        let gasData = { rt1: [], rt2: [], rt3: [] };
+
+        function addToHistory(rt, type, value) {
+            const now = new Date();
+            const timeStr = now.toLocaleTimeString();
+            const dateStr = now.toLocaleDateString();
+            
+            historyData.push({ date: dateStr, time: timeStr, rt: rt, type: type, value: value });
+
+            const body = document.getElementById('historyBody');
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${timeStr}</td>
+                <td><span class="badge bg-secondary">RT ${rt}</span></td>
+                <td>${type}</td>
+                <td class="fw-bold">${value}</td>
+            `;
+            body.insertBefore(row, body.firstChild);
+            if (body.children.length > 50) body.removeChild(body.lastChild);
+        }
+
+        function downloadCSV() {
+            if (historyData.length === 0) return alert("Belum ada data rekaman!");
+            let csv = "\uFEFFTanggal,Waktu,Sumber,Tipe,Nilai\n";
+            historyData.forEach(d => {
+                csv += `${d.date},${d.time},RT ${d.rt},${d.type},"${d.value}"\n`;
+            });
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Log_MQTT_RT_Monitoring_${new Date().toISOString().slice(0,10)}.csv`;
+            a.click();
+        }
+
+        function updateDisplay(id, val, isTemp) {
+            const el = document.getElementById(id);
+            el.textContent = isTemp ? `${parseFloat(val).toFixed(2)}°C` : val;
+        }
+
+        function updateLED(id, status) {
+            const ind = document.getElementById(`ledIndicator${id}`);
+            const txt = document.getElementById(`ledStatus${id}`);
+            const isOn = status == "1" || status.toUpperCase() == "ON";
+            ind.className = isOn ? 'led-indicator led-on' : 'led-indicator led-off';
+            txt.textContent = isOn ? 'ON' : 'OFF';
+            txt.style.color = isOn ? '#2ecc71' : '#95a5a6';
+        }
+
+        function connectMQTT() {
+            const client = mqtt.connect(mqttConfig.broker, { clientId: 'web_monitor_' + Math.random().toString(16).substr(2, 8) });
+
+            client.on('connect', () => {
+                document.getElementById('statusDot').className = 'status-dot connected';
+                document.getElementById('connectionText').textContent = 'TERHUBUNG';
+                mqttConfig.topics.forEach(t => client.subscribe(t));
+            });
+
+            client.on('message', (topic, payload) => {
+                const msg = payload.toString();
+                messageCount++;
+                document.getElementById('messageCount').textContent = messageCount;
+                document.getElementById('lastUpdateTime').textContent = new Date().toLocaleTimeString();
+
+                switch(topic) {
+                    case 'adcd': updateDisplay('temp1', msg, true); addToHistory(1, "Suhu", msg + "°C"); break;
+                    case 'efgh': updateDisplay('gas1', msg, false); addToHistory(1, "Gas", msg); break;
+                    case 'ijkl': updateLED(1, msg); addToHistory(1, "LED", msg == "1" ? "ON" : "OFF"); break;
+                    
+                    case 'panasdek': updateDisplay('temp2', msg, true); addToHistory(2, "Suhu", msg + "°C"); break;
+                    case 'meledakdek': updateDisplay('gas2', msg, false); addToHistory(2, "Gas", msg); break;
+                    case 'menyaladek': updateLED(2, msg); addToHistory(2, "LED", msg == "1" ? "ON" : "OFF"); break;
+
+                    case 'panasmasputra': updateDisplay('temp3', msg, true); addToHistory(3, "Suhu", msg + "°C"); break;
+                    case 'meledakduar': updateDisplay('gas3', msg, false); addToHistory(3, "Gas", msg); break;
+                    case 'menyalaabangku': updateLED(3, msg); addToHistory(3, "LED", msg == "1" ? "ON" : "OFF"); break;
+                }
+                updateChartsData();
+            });
+        }
+
+        function initCharts() {
+            const opt = (title) => ({ responsive: true, plugins: { title: { display: true, text: title }}});
+            tempChart = new Chart(document.getElementById('tempChart'), {
+                type: 'line',
+                data: { labels: timeLabels, datasets: [
+                    { label: 'RT 1', data: tempData.rt1, borderColor: '#e74c3c', tension: 0.3, fill: false },
+                    { label: 'RT 2', data: tempData.rt2, borderColor: '#2ecc71', tension: 0.3, fill: false },
+                    { label: 'RT 3', data: tempData.rt3, borderColor: '#f39c12', tension: 0.3, fill: false }
+                ]},
+                options: opt('Monitoring Suhu (°C)')
+            });
+            gasChart = new Chart(document.getElementById('gasChart'), {
+                type: 'line',
+                data: { labels: timeLabels, datasets: [
+                    { label: 'RT 1', data: gasData.rt1, borderColor: '#9b59b6', tension: 0.3, fill: false },
+                    { label: 'RT 2', data: gasData.rt2, borderColor: '#1abc9c', tension: 0.3, fill: false },
+                    { label: 'RT 3', data: gasData.rt3, borderColor: '#34495e', tension: 0.3, fill: false }
+                ]},
+                options: opt('Level Deteksi Gas')
+            });
+        }
+
+        function updateChartsData() {
+            const now = new Date().toLocaleTimeString();
+            if (timeLabels.length > 15) {
+                timeLabels.shift();
+                tempData.rt1.shift(); tempData.rt2.shift(); tempData.rt3.shift();
+                gasData.rt1.shift(); gasData.rt2.shift(); gasData.rt3.shift();
+            }
+            timeLabels.push(now);
+            tempData.rt1.push(parseFloat(document.getElementById('temp1').innerText) || 0);
+            tempData.rt2.push(parseFloat(document.getElementById('temp2').innerText) || 0);
+            tempData.rt3.push(parseFloat(document.getElementById('temp3').innerText) || 0);
+            gasData.rt1.push(parseInt(document.getElementById('gas1').innerText) || 0);
+            gasData.rt2.push(parseInt(document.getElementById('gas2').innerText) || 0);
+            gasData.rt3.push(parseInt(document.getElementById('gas3').innerText) || 0);
+            tempChart.update('none');
+            gasChart.update('none');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initCharts();
+            connectMQTT();
+        });
+    </script>
+</body>
+</html>
